@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Schedule Viewer</title>
+  <link rel="stylesheet" href="schedule-viewer.css">
+</head>
+<body>
+  <h1>Schedule Viewer</h1>
+  <input type="file" id="fileInput" accept=".json">
+  <div class="view-switch">
+    <button onclick="setView('rooms')">Rooms</button>
+    <button onclick="setView('classes')">Classes</button>
+    <button onclick="setView('subjects')">Subjects</button>
+    <button onclick="setView('teachers')">Teachers</button>
+    <label style="margin-left:2em"><input type="checkbox" id="calendarToggle" onchange="toggleCalendar()" checked> Calendar View</label>
+  </div>
+  <div class="filters" id="filters"></div>
+  <div id="results"></div>
+
+  <script>
+    let schedule = null;
+    let currentView = 'rooms';
+    let filters = {};
+    let calendarView = true;
+
+    document.getElementById('fileInput').addEventListener('change', function(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(evt) {
+        try {
+          schedule = JSON.parse(evt.target.result);
+          filters = {};
+          render();
+        } catch (err) {
+          alert('Invalid JSON file.');
+        }
+      };
+      reader.readAsText(file);
+    });
+
+    // Load schedule from file path in URL (if provided)
+    window.addEventListener('DOMContentLoaded', () => {
+      const params = new URLSearchParams(window.location.search);
+      let jsonData = params.get('data');
+      if (jsonData) {
+        try {
+          schedule = JSON.parse(decodeURIComponent(jsonData));
+          filters = {};
+          render();
+        } catch (err) {
+          document.getElementById('results').innerHTML = '<em>Could not parse schedule data.</em>';
+        }
+        return;
+      }
+    });
+
+    function setView(view) {
+      currentView = view;
+      filters = {};
+      render();
+    }
+
+    function toggleCalendar() {
+      calendarView = document.getElementById('calendarToggle').checked;
+      render();
+    }
+
+    function render() {
+      if (!schedule || !schedule.Assignments) {
+        document.getElementById('results').innerHTML = '<em>No schedule loaded.</em>';
+        document.getElementById('filters').innerHTML = '';
+        return;
+      }
+      let assignments = schedule.Assignments;
+      // Apply filters
+      assignments = assignments.filter(a => {
+        for (const key in filters) {
+          if (filters[key] && getValue(a, key) !== filters[key]) return false;
+        }
+        return true;
+      });
+      // Build filter controls
+      buildFilters(assignments);
+      // Render view
+    //   if (calendarView) renderCalendar(assignments);
+      if (currentView === 'rooms') renderRooms(assignments);
+      else if (currentView === 'classes') renderClasses(assignments);
+      else if (currentView === 'subjects') renderSubjects(assignments);
+      else if (currentView === 'teachers') renderTeachers(assignments);
+    }
+
+    function buildFilters(assignments) {
+      let html = '';
+      const dayOrder = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+      if (currentView === 'rooms') {
+        const departments = [...new Set(assignments.map(a => a.Room?.Department))].sort();
+        html += selectFilter('Department', departments);
+        const rooms = [...new Set(assignments.map(a => a.Room?.Name))].sort();
+        html += selectFilter('Room', rooms);
+      }
+      if (currentView === 'classes') {
+        const courses = [...new Set(assignments.map(a => a.Subject?.Course?.Name))].sort();
+        html += selectFilter('Course', courses);
+        const year = [...new Set(assignments.map(a => a.Subject?.Course?.Year))].sort();
+        html += selectFilter('Year', year);
+        const classes = [...new Set(assignments.flatMap(a => Array.isArray(a.Class?.ClassNames) ? a.Class.ClassNames : []))].sort();
+        if (classes.length > 0) html += selectFilter('Class', classes);
+      }
+      if (currentView === 'subjects') {
+        const courses = [...new Set(assignments.map(a => a.Subject?.Course?.Name))].sort();
+        html += selectFilter('Course', courses);
+        const year = [...new Set(assignments.map(a => a.Subject?.Course?.Year))].sort();
+        html += selectFilter('Year', year);
+        const subjects = [...new Set(assignments.map(a => a.Subject?.Name))].sort();
+        html += selectFilter('Subject', subjects);
+      }
+      if (currentView === 'teachers') {
+        const courses = [...new Set(assignments.map(a => a.Subject?.Course?.Name))].sort();
+        html += selectFilter('Course', courses);
+        const year = [...new Set(assignments.map(a => a.Subject?.Course?.Year))].sort();
+        html += selectFilter('Year', year);
+        const teachers = [...new Set(assignments.map(a => a.Teacher))].sort();
+        html += selectFilter('Teacher', teachers);
+      }
+      // Common filter: TimeSlot
+      let days = [...new Set(schedule.Assignments.map(a => a.TimeSlot?.Day))];
+      days = days.filter(d => d).sort((a, b) => dayOrder.indexOf(a) - dayOrder.indexOf(b));
+      html += selectFilter('Day', days);
+      const hours = [...new Set(schedule.Assignments.map(a => a.TimeSlot?.StartTime))].sort((a,b)=>a-b);
+      html += selectFilter('Hour', hours);
+      document.getElementById('filters').innerHTML = html;
+    }
+
+    function selectFilter(key, values) {
+      if (!values.length) return '';
+      const selected = filters[key] || '';
+      let html = `<label>${key}: <select onchange="filters['${key}']=this.value;render()">`;
+      html += `<option value="">All</option>`;
+      for (const v of values) {
+        html += `<option value="${v}"${selected===v?' selected':''}>${v}</option>`;
+      }
+      html += `</select></label> `;
+      return html;
+    }
+
+    function getValue(a, key) {
+      switch(key) {
+        case 'Room': return a.Room?.Name;
+        case 'Course': return a.Subject?.Course?.Name;
+        case 'Class':  return Array.isArray(a.Class?.ClassNames) ? a.Class.ClassNames.join(',') : '';
+        case 'Subject': return a.Subject?.Name;
+        case 'Teacher': return a.Teacher;
+        case 'Day': return a.TimeSlot?.Day;
+        case 'Hour': return a.TimeSlot?.StartTime != null ? String(a.TimeSlot.StartTime) : '';
+        case 'Department': return a.Room?.Department;
+        default: return '';
+      }
+    }
+
+    function renderRooms(assignments) {
+      const grouped = groupBy(assignments, a => a.Room?.Name);
+      let html = '';
+      const sortedRooms = Object.keys(grouped).sort();
+      for (const room of sortedRooms) {
+        sortByTimeSlot(grouped[room]);
+        html += `<h2>Room: ${room}</h2>`;
+        if (calendarView)
+            html += renderCalendar(grouped[room], true); 
+        else
+            html += renderTable(grouped[room]);
+      }
+      document.getElementById('results').innerHTML = html;
+    }
+
+    function renderClasses(assignments) {
+      const grouped = {};
+      for (const a of assignments) {
+        const course = a.Subject?.Course?.Name || '';
+        const year = a.Subject?.Course?.Year || '';
+        const classNames = Array.isArray(a.Class?.ClassNames) ? a.Class.ClassNames : [];
+        if (classNames.length) {
+          for (const cname of classNames) {
+            const key = `${course} ${year}${cname}`;
+            if (!grouped[key]) grouped[key] = [];
+            grouped[key].push(a);
+          }
+        } else {
+          // fallback to class name if ClassNames is empty
+          const key = `${course} ${year}${a.Class?.Name || ''}`;
+          if (!grouped[key]) grouped[key] = [];
+          grouped[key].push(a);
+        }
+      }
+      let html = '';
+      const sorted = Object.keys(grouped).sort();
+      for (const cls of sorted) {
+        sortByTimeSlot(grouped[cls]);
+        html += `<h2>Class: ${cls}</h2>`;
+        if (calendarView)
+            html += renderCalendar(grouped[cls], true);
+        else
+            html += renderTable(grouped[cls]);
+      }
+      document.getElementById('results').innerHTML = html;
+    }
+
+    function renderSubjects(assignments) {
+      const grouped = groupBy(assignments, a => `${a.Subject?.Name || ''}`);
+      let html = '';
+      const sorted = Object.keys(grouped).sort();
+      for (const subj of sorted) {
+        sortByTimeSlot(grouped[subj]);
+        html += `<h2>Subject: ${subj}</h2>`;
+        if (calendarView)
+            html += renderCalendar(grouped[subj], true);
+        else
+            html += renderTable(grouped[subj]);
+      }
+      document.getElementById('results').innerHTML = html;
+    }
+
+    function renderTeachers(assignments) {
+      const grouped = groupBy(assignments, a => `${a.Teacher || ''}`);
+      let html = '';
+      const sorted = Object.keys(grouped).sort();
+      for (const subj of sorted) {
+        sortByTimeSlot(grouped[subj]);
+        html += `<h2>Teacher: ${subj}</h2>`;
+        if (calendarView)
+            html += renderCalendar(grouped[subj], true); 
+        else
+            html += renderTable(grouped[subj]);
+      }
+      document.getElementById('results').innerHTML = html;
+    }
+
+    function renderTable(assignments) {
+      if (!assignments.length) return '<em>No assignments.</em>';
+      let html = '<table><thead><tr>';
+      html += '<th>Course</th><th>Subject</th><th>Class</th><th>Teacher</th><th>Room</th><th>Day</th><th>Time</th></tr></thead><tbody>';
+      for (const a of assignments) {
+        let hourStr = '';
+        if (a.TimeSlot?.StartTime != null) {
+          const [sh, sm] = a.TimeSlot.StartTime.split(':');
+          const [eh, em] = a.TimeSlot.EndTime ? a.TimeSlot.EndTime.split(':') : ['', ''];
+          hourStr = `${sh.padStart(2, '0')}:${sm.padStart(2, '0')}` +
+            (a.TimeSlot.EndTime ? ` - ${eh.padStart(2, '0')}:${em.padStart(2, '0')}` : '');
+        }
+        html += `<tr>
+          <td>${a.Subject?.Course?.Name || ''}</td>
+          <td>${a.Subject?.Name || ''}</td>
+          <td>${a.Class?.Name || ''}</td>
+          <td>${a.Teacher || ''}</td>
+          <td>${a.Room?.Name || ''}</td>
+          <td>${a.TimeSlot?.Day || ''}</td>
+          <td>${hourStr}</td>
+        </tr>`;
+      }
+      html += '</tbody></table>';
+      return html;
+    }
+
+    function joinConsecutiveAssignments(assignments) {
+      // Sort by day and start time
+      sortByTimeSlot(assignments);
+      const joined = [];
+      for (const day of [...new Set(assignments.map(a => a.TimeSlot?.Day))]) {
+        const dayAssignments = assignments.filter(a => a.TimeSlot?.Day === day);
+        let i = 0;
+        while (i < dayAssignments.length) {
+          const a = dayAssignments[i];
+          let j = i + 1;
+          let endTime = a.TimeSlot?.EndTime;
+          while (
+            j < dayAssignments.length &&
+            dayAssignments[j].Class?.Name === a.Class?.Name &&
+            dayAssignments[j].Room?.Name === a.Room?.Name &&
+            dayAssignments[j].Teacher === a.Teacher &&
+            dayAssignments[j].TimeSlot?.StartTime === endTime
+          ) {
+            endTime = dayAssignments[j].TimeSlot?.EndTime;
+            j++;
+          }
+          // Create a new assignment object with merged time
+          joined.push({
+            ...a,
+            TimeSlot: {
+              ...a.TimeSlot,
+              EndTime: endTime
+            }
+          });
+          i = j;
+        }
+      }
+      return joined;
+    }
+
+    function renderCalendar(assignments, inline = false) {
+      if (!assignments.length) return '';
+
+      // Join consecutive assignments with the same class name on the same day
+      let mergedAssignments = joinConsecutiveAssignments(assignments);
+
+      const dayOrder = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+      const allAssignments = schedule && schedule.Assignments ? schedule.Assignments : assignments;
+
+      const allDays = [...new Set(allAssignments.map(a => a.TimeSlot?.Day))].filter(Boolean);
+      allDays.sort((a, b) => dayOrder.indexOf(a) - dayOrder.indexOf(b));
+
+      const allHours = [...new Set(allAssignments.map(a => a.TimeSlot?.StartTime))]
+        .filter(Boolean)
+        .sort((a, b) => {
+          const [ha, ma] = a.split(':').map(Number);
+          const [hb, mb] = b.split(':').map(Number);
+          return ha !== hb ? ha - hb : ma - mb;
+        });
+
+      let html = '<div class="calendar-container">';
+      html += '<table><thead><tr>';
+      html += '<th>Hour</th>';
+      for (const day of allDays) html += `<th>${day}</th>`;
+      html += '</tr></thead><tbody>';
+
+      // Track which cells are covered by rowspans
+      const cellCovered = {};
+      for (let rowIdx = 0; rowIdx < allHours.length; rowIdx++) {
+        const hour = allHours[rowIdx];
+        const [h, m] = hour.split(':');
+        html += `<tr><td>${h.padStart(2, '0')}:${m.padStart(2, '0')}</td>`;
+        for (let dayIdx = 0; dayIdx < allDays.length; dayIdx++) {
+          const day = allDays[dayIdx];
+          const cellKey = `${rowIdx}-${dayIdx}`;
+          if (cellCovered[cellKey]) continue; // skip cells covered by rowspan
+          // Find assignment that starts at this hour and day
+          const a = mergedAssignments.find(x => x.TimeSlot?.Day === day && x.TimeSlot?.StartTime === hour);
+          if (a) {
+            // Calculate how many hours this assignment spans
+            let span = 1;
+            if (a.TimeSlot?.EndTime) {
+              const startIdx = allHours.indexOf(a.TimeSlot.StartTime);
+              const endIdx = allHours.indexOf(a.TimeSlot.EndTime);
+              if (endIdx > startIdx) span = endIdx - startIdx;
+            }
+            // Mark cells as covered
+            for (let k = 1; k < span; k++) {
+              cellCovered[`${rowIdx + k}-${dayIdx}`] = true;
+            }
+            // Detect conflicts: overlapping assignments for same room or teacher at same time
+            let isConflict = false;
+            if (a.TimeSlot?.Day && a.TimeSlot?.StartTime) {
+              isConflict = mergedAssignments.some(x =>
+                x !== a &&
+                x.TimeSlot?.Day === a.TimeSlot.Day &&
+                x.TimeSlot?.StartTime === a.TimeSlot.StartTime &&
+                (
+                  (x.Room?.Name && x.Room?.Name === a.Room?.Name) ||
+                  (x.Teacher && x.Teacher === a.Teacher)
+                )
+              );
+            }
+            const cellClass = isConflict ? "calendar-assignment conflict-assignment" : "calendar-assignment";
+            html += `<td rowspan="${span}" class="${cellClass}">`;
+            html += `<strong>${a.Class?.Name || ''}</strong><br>`;
+            html += `${a.Teacher || ''} - ${a.Room?.Name || ''}<br>`;
+            let formattedTime = '';
+            if (a.TimeSlot?.StartTime) {
+              const [sh, sm] = a.TimeSlot.StartTime.split(':');
+              formattedTime = `${sh.padStart(2, '0')}:${sm.padStart(2, '0')}`;
+              if (a.TimeSlot?.EndTime) {
+              const [eh, em] = a.TimeSlot.EndTime.split(':');
+              formattedTime += ` - ${eh.padStart(2, '0')}:${em.padStart(2, '0')}`;
+              }
+            }
+            html += `<span>${formattedTime}</span>`;
+            html += `</td>`;
+          } else {
+            html += '<td></td>';
+          }
+        }
+        html += '</tr>';
+      }
+
+      html += '</tbody></table></div>';
+      return html;
+    }
+
+    function sortByTimeSlot(assignments) {
+        // Group by each class name in ClassNames
+        const dayOrder = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+        assignments.sort((a, b) => {
+            const dayA = a.TimeSlot?.Day || '';
+            const dayB = b.TimeSlot?.Day || '';
+            const idxA = dayOrder.indexOf(dayA);
+            const idxB = dayOrder.indexOf(dayB);
+            if (idxA !== -1 && idxB !== -1) {
+            if (idxA < idxB) return -1;
+            if (idxA > idxB) return 1;
+            } else if (idxA !== -1) {
+            return -1;
+            } else if (idxB !== -1) {
+            return 1;
+            } else {
+            if (dayA < dayB) return -1;
+            if (dayA > dayB) return 1;
+            }
+            const hourA = a.TimeSlot?.StartTime ?? 0;
+            const hourB = b.TimeSlot?.StartTime ?? 0;
+            return hourA - hourB;
+        });
+    }
+
+    function groupBy(arr, keyFn) {
+      const map = {};
+      for (const item of arr) {
+        const key = keyFn(item) || 'Unknown';
+        if (!map[key]) map[key] = [];
+        map[key].push(item);
+      }
+      return map;
+    }
+  </script>
+</body>
+</html>

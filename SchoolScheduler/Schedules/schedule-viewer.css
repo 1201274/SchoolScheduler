@@ -1,0 +1,71 @@
+body {
+  font-family: Arial, sans-serif;
+  margin: 2em;
+}
+
+.filters {
+  margin-bottom: 1em;
+}
+
+.view-switch {
+  margin-bottom: 1em;
+}
+
+table {
+  border-collapse: separate;
+  border-spacing: 3px;
+  width: 100%;
+  margin-bottom: 2em;
+}
+
+th, td {
+  border: 1px solid #ccc;
+  padding: 6px 10px;
+  text-align: left;
+}
+
+th {
+  background: #f0f0f0;
+}
+
+.hidden {
+  display: none;
+}
+
+.calendar-cell {
+  margin-bottom: 4px;
+  padding: 2px;
+  border-bottom: 1px solid #e6e6e6;
+}
+
+.calendar-multi {
+  background: #ffd6d6;
+  border: 1px solid #7cb9ff;
+}
+
+.calendar-assignment {
+  margin-bottom: 4px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: #7cb9ff;
+  color: #1a2a3a;
+}
+
+.conflict-assignment {
+  background: #ffcccc !important;
+  color: #a00 !important;
+  border: 2px solid #a00 !important;
+}
+
+h2 {
+  margin-top: 2em;
+  margin-bottom: 0.5em;
+}
+
+input[type="file"] {
+  margin-bottom: 1em;
+}
+
+label {
+  margin-right: 1em;
+}
